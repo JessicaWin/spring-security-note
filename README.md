@@ -2833,5 +2833,1210 @@ Contact findContactByName(@Param("n") String name);
 ## OAuth2
 - OAuth 2.0 登录功能允许应用程序让用户使用 OAuth 2.0 提供商（例如 GitHub）或 OpenID Connect 1.0 提供商（例如 Google）的现有帐户登录到应用程序
 
-### 核心配置
+### OAuth2 Log In
 - Spring Boot 2.x 为 OAuth 2.0 登录提供了完整的自动配置功能。
+#### 核心配置
+- 以github登录为例
+- 首先在github页面创建一个app，https://github.com/settings/apps，指定Homepage URL和Callback URL，
+	- Homepage URL： http://localhost:8080/home
+	- Callback URL： http://localhost:8080/login/oauth2/code/github
+- 配置spring boot的application文件
+```
+spring:
+	security:
+		oauth2:
+		client:
+			registration:
+			github:
+				client-id: Iv1.032cc98c8f793371
+				client-secret: 96a86b8ebe7c1a45d7b276d2c5b783f0536448cc
+```
+- 配置HttpSecurity
+```
+@Bean
+SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+	return http.oauth2Login().defaultSuccessUrl("/design").and()
+			....
+			.build();
+}
+```
+- 启动spring boot，访问login页面：http://localhost:8080/login
+[github-login-page](github-login-page.png)
+- 点击Github进行登录，会跳转到github登录页面进行登录
+#### CommonOAuth2Provider
+- CommonOAuth2Provider 为许多知名提供商预定义了一组默认客户端属性：Google、GitHub、Facebook 和 Okta。
+- 例如，提供商的授权 uri、令牌 uri 和用户信息 uri 不会经常更改。因此，提供默认值以减少所需的配置是有意义的。
+#### 配置自定义提供商属性
+- 有一些 OAuth 2.0 提供程序支持多租户，这会导致每个租户（或子域）有不同的协议端点。
+- 例如，向 Okta 注册的 OAuth 客户端被分配到特定的子域并拥有自己的协议端点。
+- 对于这些情况，Spring Boot 2.x 提供了以下基本属性来配置自定义提供程序属性：spring.security.oauth2.client.provider.[providerId]
+```
+spring:
+	security:
+		oauth2:
+		client:
+			registration:
+			okta:
+				client-id: okta-client-id
+				client-secret: okta-client-secret
+			provider:
+			okta:	
+				authorization-uri: https://your-subdomain.oktapreview.com/oauth2/v1/authorize
+				token-uri: https://your-subdomain.oktapreview.com/oauth2/v1/token
+				user-info-uri: https://your-subdomain.oktapreview.com/oauth2/v1/userinfo
+				user-name-attribute: sub
+				jwk-set-uri: https://your-subdomain.oktapreview.com/oauth2/v1/keys
+```
+#### 覆盖Spring Boot 2.x的自动配置
+- 用于 OAuth 客户端支持的 Spring Boot 2.x 自动配置类是 OAuth2ClientAutoConfiguration。它执行以下任务：
+	- 注册由配置的 OAuth 客户端属性中的 ClientRegistration 组成的 ClientRegistrationRepository @Bean。
+	- 注册 SecurityFilterChain @Bean 并通过 httpSecurity.oauth2Login() 启用 OAuth 2.0 登录。
+- 如果您需要根据您的具体要求覆盖自动配置，您可以通过以下方式进行：
+	- 注册一个 ClientRegistrationRepository @Bean
+	```
+	@Configuration
+	public class OAuth2LoginConfig {
+
+		@Bean
+		public ClientRegistrationRepository clientRegistrationRepository() {
+			return new InMemoryClientRegistrationRepository(this.googleClientRegistration());
+		}
+
+		private ClientRegistration googleClientRegistration() {
+			return ClientRegistration.withRegistrationId("google")
+				.clientId("google-client-id")
+				.clientSecret("google-client-secret")
+				.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+				.authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+				.redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+				.scope("openid", "profile", "email", "address", "phone")
+				.authorizationUri("https://accounts.google.com/o/oauth2/v2/auth")
+				.tokenUri("https://www.googleapis.com/oauth2/v4/token")
+				.userInfoUri("https://www.googleapis.com/oauth2/v3/userinfo")
+				.userNameAttributeName(IdTokenClaimNames.SUB)
+				.jwkSetUri("https://www.googleapis.com/oauth2/v3/certs")
+				.clientName("Google")
+				.build();
+		}
+	}
+	```
+	- 注册一个SecurityFilterChain @Bean
+	```
+	@Configuration
+	@EnableWebSecurity
+	public class OAuth2LoginSecurityConfig {
+
+		@Bean
+		public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			http
+				.authorizeHttpRequests(authorize -> authorize
+					.anyRequest().authenticated()
+				)
+				.oauth2Login(withDefaults());
+			return http.build();
+		}
+	}
+	```
+	- 完全覆盖自动配置
+	```
+	@Configuration
+	public class OAuth2LoginConfig {
+
+		@Bean
+		public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			http
+				.authorizeHttpRequests(authorize -> authorize
+					.anyRequest().authenticated()
+				)
+				.oauth2Login(withDefaults());
+			return http.build();
+		}
+
+		@Bean
+		public ClientRegistrationRepository clientRegistrationRepository() {
+			return new InMemoryClientRegistrationRepository(this.googleClientRegistration());
+		}
+
+		private ClientRegistration googleClientRegistration() {
+			return ClientRegistration.withRegistrationId("google")
+				.clientId("google-client-id")
+				.clientSecret("google-client-secret")
+				.clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+				.authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+				.redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+				.scope("openid", "profile", "email", "address", "phone")
+				.authorizationUri("https://accounts.google.com/o/oauth2/v2/auth")
+				.tokenUri("https://www.googleapis.com/oauth2/v4/token")
+				.userInfoUri("https://www.googleapis.com/oauth2/v3/userinfo")
+				.userNameAttributeName(IdTokenClaimNames.SUB)
+				.jwkSetUri("https://www.googleapis.com/oauth2/v3/certs")
+				.clientName("Google")
+				.build();
+		}
+	}
+	```
+#### 登录页面配置
+- 默认情况下，OAuth 2.0 登录页面由 DefaultLoginPageGenerateFilter 自动生成。
+- 默认登录页面显示每个已配置的 OAuth 客户端及其 ClientRegistration.clientName 作为链接，该链接能够启动授权请求（或 OAuth 2.0 登录）。
+- 每个 OAuth 客户端的链接目标默认如下：
+	- OAuth2AuthorizationRequestRedirectFilter.DEFAULT_AUTHORIZATION_REQUEST_BASE_URI +“/{registrationId}”
+	- <a href="/oauth2/authorization/google">Google</a>
+- 要覆盖默认登录页面，请配置 oauth2Login().loginPage() 和（可选）oauth2Login().authorizationEndpoint().baseUri()
+```
+@Configuration
+@EnableWebSecurity
+public class OAuth2LoginSecurityConfig {
+
+	@Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+		http
+			.oauth2Login(oauth2 -> oauth2
+			    .loginPage("/login/oauth2")
+			    ...
+			    .authorizationEndpoint(authorization -> authorization
+			        .baseUri("/login/oauth2/authorization")
+			        ...
+			    )
+			);
+		return http.build();
+	}
+}
+```
+#### 重定向链接
+- 授权服务器使用重定向链接通过资源所有者用户代理将授权响应（包含授权凭证）返回给客户端。
+- 默认授权响应 baseUri（重定向端点）为 /login/oauth2/code/*，它在 OAuth2LoginAuthenticationFilter.DEFAULT_FILTER_PROCESSES_URI 中定义。
+- 如果您想自定义授权响应baseUri，请按如下方式配置：
+```
+@Configuration
+@EnableWebSecurity
+public class OAuth2LoginSecurityConfig {
+
+    @Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+		http
+			.oauth2Login(oauth2 -> oauth2
+			    .redirectionEndpoint(redirection -> redirection
+			        .baseUri("/login/oauth2/callback/*")
+			        ...
+			    )
+			);
+		return http.build();
+	}
+}
+```
+#### UserInfo Endpoint
+- UserInfo 端点包括许多配置选项，如以下小节中所述：
+	- 映射用户权限
+	- OAuth 2.0 用户服务
+	- OpenID Connect 1.0 用户服务
+- 映射用户权限
+	- 用户成功通过 OAuth 2.0 提供程序进行身份验证后，OAuth2User.getAuthorities()（或 OidcUser.getAuthorities()）包含从 OAuth2UserRequest.getAccessToken().getScopes() 获得的以 SCOPE_ 为前缀的授权权限列表。这些授予的权限可以映射到一组新的 GrantedAuthority 实例，这些实例在完成身份验证时提供给 OAuth2AuthenticationToken。
+	- 使用 GrantedAuthoritiesMapper
+	```
+	@Configuration
+	@EnableWebSecurity
+	public class OAuth2LoginSecurityConfig {
+
+		@Bean
+		public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			http
+				.oauth2Login(oauth2 -> oauth2
+					.userInfoEndpoint(userInfo -> userInfo
+						.userAuthoritiesMapper(this.userAuthoritiesMapper())
+						...
+					)
+				);
+			return http.build();
+		}
+
+		private GrantedAuthoritiesMapper userAuthoritiesMapper() {
+			return (authorities) -> {
+				Set<GrantedAuthority> mappedAuthorities = new HashSet<>();
+
+				authorities.forEach(authority -> {
+					if (OidcUserAuthority.class.isInstance(authority)) {
+						OidcUserAuthority oidcUserAuthority = (OidcUserAuthority)authority;
+
+						OidcIdToken idToken = oidcUserAuthority.getIdToken();
+						OidcUserInfo userInfo = oidcUserAuthority.getUserInfo();
+
+						// Map the claims found in idToken and/or userInfo
+						// to one or more GrantedAuthority's and add it to mappedAuthorities
+
+					} else if (OAuth2UserAuthority.class.isInstance(authority)) {
+						OAuth2UserAuthority oauth2UserAuthority = (OAuth2UserAuthority)authority;
+
+						Map<String, Object> userAttributes = oauth2UserAuthority.getAttributes();
+
+						// Map the attributes found in userAttributes
+						// to one or more GrantedAuthority's and add it to mappedAuthorities
+
+					}
+				});
+
+				return mappedAuthorities;
+			};
+		}
+	}
+
+	@Configuration
+	@EnableWebSecurity
+	public class OAuth2LoginSecurityConfig {
+
+		@Bean
+		public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			http
+				.oauth2Login(withDefaults());
+			return http.build();
+		}
+
+		@Bean
+		public GrantedAuthoritiesMapper userAuthoritiesMapper() {
+			...
+		}
+	}
+	```
+	- 使用 OAuth2UserService 的基于委派的策略
+		- 相比于使用 GrantedAuthoritiesMapper ，更推荐使用OAuth 2.0 UserService。
+		- OAuth 2.0 UserService更灵活，因为它允许您访问 OAuth2UserRequest 和 OAuth2User（当使用 OAuth 2.0 UserService 时）或 OidcUserRequest 和 OidcUser（当使用 OpenID Connect 1.0 UserService 时）。
+		- OAuth2UserRequest（和 OidcUserRequest）为您提供对关联 OAuth2AccessToken 的访问权限，这在委托者需要从受保护资源获取权限信息才能映射用户的自定义权限的情况下非常有用。
+	```
+	@Configuration
+	@EnableWebSecurity
+	public class OAuth2LoginSecurityConfig {
+
+		@Bean
+		public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			http
+				.oauth2Login(oauth2 -> oauth2
+					.userInfoEndpoint(userInfo -> userInfo
+						.oidcUserService(this.oidcUserService())
+						...
+					)
+				);
+			return http.build();
+		}
+
+		private OAuth2UserService<OidcUserRequest, OidcUser> oidcUserService() {
+			final OidcUserService delegate = new OidcUserService();
+
+			return (userRequest) -> {
+				// Delegate to the default implementation for loading a user
+				OidcUser oidcUser = delegate.loadUser(userRequest);
+
+				OAuth2AccessToken accessToken = userRequest.getAccessToken();
+				Set<GrantedAuthority> mappedAuthorities = new HashSet<>();
+
+				// TODO
+				// 1) Fetch the authority information from the protected resource using accessToken
+				// 2) Map the authority information to one or more GrantedAuthority's and add it to mappedAuthorities
+
+				// 3) Create a copy of oidcUser but use the mappedAuthorities instead
+				oidcUser = new DefaultOidcUser(mappedAuthorities, oidcUser.getIdToken(), oidcUser.getUserInfo());
+
+				return oidcUser;
+			};
+		}
+	}
+	```
+#### OAuth 2.0 用户服务
+	- DefaultOAuth2UserService 是标准 OAuth 2.0 Provider 的 OAuth2UserService 的实现
+	- OAuth2UserService 从 UserInfo 端点获取最终用户（资源所有者）的用户属性（通过使用授权流程中授予客户端的访问令牌），并以 OAuth2User 的形式返回 AuthenticatedPrincipal。
+	- DefaultOAuth2UserService 在 UserInfo 端点请求用户属性时使用 RestOperations 实例。
+	- 如果需要自定义 UserInfo 请求的预处理，可以为 DefaultOAuth2UserService.setRequestEntityConverter() 提供自定义 Converter<OAuth2UserRequest, RequestEntity<?>>。默认实现 OAuth2UserRequestEntityConverter 构建一个代表 UserInfo 请求的 RequestEntity，在 Authorization 标头中设置 OAuth2AccessToken。
+	- 另一方面，如果您需要自定义 UserInfo 响应的后处理，则需要为 DefaultOAuth2UserService.setRestOperations() 提供自定义配置的 RestOperations。
+	- 默认的 RestOperations 配置如下：
+	```
+	RestTemplate restTemplate = new RestTemplate();
+	restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+	```
+	- 无论您自定义DefaultOAuth2UserService还是提供自己的OAuth2UserService实现，都需要按如下方式进行配置：
+	```
+	@Configuration
+	@EnableWebSecurity
+	public class OAuth2LoginSecurityConfig {
+
+		@Bean
+		public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			http
+				.oauth2Login(oauth2 -> oauth2
+					.userInfoEndpoint(userInfo -> userInfo
+						.userService(this.oauth2UserService())
+						...
+					)
+				);
+			return http.build();
+		}
+
+		private OAuth2UserService<OAuth2UserRequest, OAuth2User> oauth2UserService() {
+			...
+		}
+	}
+	```
+#### OpenID Connect 1.0 用户服务
+	- OidcUserService 是支持 OpenID Connect 1.0 Provider 的 OAuth2UserService 的实现。
+	- OidcUserService 在 UserInfo 端点请求用户属性时利用 DefaultOAuth2UserService。
+	- 如果需要自定义 UserInfo 请求的预处理或 UserInfo 响应的后处理，则需要为 OidcUserService.setOauth2UserService() 提供自定义配置的 DefaultOAuth2UserService。
+	- 无论是自定义 OidcUserService 还是为 OpenID Connect 1.0 Provider 提供自己的 OAuth2UserService 实现，都需要按如下方式配置它
+	```
+	@Configuration
+	@EnableWebSecurity
+	public class OAuth2LoginSecurityConfig {
+
+		@Bean
+		public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			http
+				.oauth2Login(oauth2 -> oauth2
+					.userInfoEndpoint(userInfo -> userInfo
+						.oidcUserService(this.oidcUserService())
+						...
+					)
+				);
+			return http.build();
+		}
+
+		private OAuth2UserService<OidcUserRequest, OidcUser> oidcUserService() {
+			...
+		}
+	}
+	```
+#### OpenID Connect 1.0 Logout
+- OpenID Connect 会话管理 1.0 允许使用客户端在提供商处注销最终用户。可用的策略之一是  RP-Initiated Logout
+- 如果 OpenID 提供程序同时支持会话管理和发现，则客户端可以从 OpenID 提供程序的发现元数据获取 end_session_endpoint URL。您可以通过使用issuer-uri 配置 ClientRegistration 来实现此目的，如下所示
+	- 通过指定 spring.security.oauth2.client.provider.[providerId].issuer-uri 属性，可以使用 OpenID Connect 提供程序的配置端点或授权服务器的元数据端点的发现来初始配置 ClientRegistration
+```
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-secret: okta-client-secret
+            ...
+        provider:
+          okta:
+            issuer-uri: https://dev-1234.oktapreview.com
+```
+- 另外，还可以配置OidcClientInitiatedLogoutSuccessHandler，它实现RP-Initiated Logout，如下：
+```
+@Configuration
+@EnableWebSecurity
+public class OAuth2LoginSecurityConfig {
+
+	@Autowired
+	private ClientRegistrationRepository clientRegistrationRepository;
+
+	@Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+		http
+			.authorizeHttpRequests(authorize -> authorize
+				.anyRequest().authenticated()
+			)
+			.oauth2Login(withDefaults())
+			.logout(logout -> logout
+				.logoutSuccessHandler(oidcLogoutSuccessHandler())
+			);
+		return http.build();
+	}
+
+	private LogoutSuccessHandler oidcLogoutSuccessHandler() {
+		OidcClientInitiatedLogoutSuccessHandler oidcLogoutSuccessHandler =
+				new OidcClientInitiatedLogoutSuccessHandler(this.clientRegistrationRepository);
+
+		// Sets the location that the End-User's User Agent will be redirected to
+		// after the logout has been performed at the Provider
+		oidcLogoutSuccessHandler.setPostLogoutRedirectUri("{baseUrl}");
+
+		return oidcLogoutSuccessHandler;
+	}
+}
+```
+### OAuth 2.0 Client
+- 从高层次来看，可用的核心功能包括：
+	- 授权支持
+		- Authorization Code
+		- Refresh Token
+		- Client Credentials
+		- Resource Owner Password Credentials
+		- JWT Bearer
+	- 客户端身份验证支持
+		- JWT Bearer
+	- HTTP 客户端支持
+		- Servlet 环境的 WebClient 集成（用于请求受保护的资源）
+- HttpSecurity.oauth2Client() DSL 提供了许多配置选项，用于自定义 OAuth 2.0 客户端使用的核心组件。
+- 此外，HttpSecurity.oauth2Client().authorizationCodeGrant() 允许自定义授权代码授予。
+```
+@Configuration
+@EnableWebSecurity
+public class OAuth2ClientSecurityConfig {
+
+	@Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+		http
+			.oauth2Client(oauth2 -> oauth2
+				.clientRegistrationRepository(this.clientRegistrationRepository())
+				.authorizedClientRepository(this.authorizedClientRepository())
+				.authorizedClientService(this.authorizedClientService())
+				.authorizationCodeGrant(codeGrant -> codeGrant
+					.authorizationRequestRepository(this.authorizationRequestRepository())
+					.authorizationRequestResolver(this.authorizationRequestResolver())
+					.accessTokenResponseClient(this.accessTokenResponseClient())
+				)
+			);
+		return http.build();
+	}
+}
+```
+- OAuth2AuthorizedClientManager 负责与一个或多个 OAuth2AuthorizedClientProvider 协作管理 OAuth 2.0 客户端的授权（或重新授权）。以下代码显示了如何注册 OAuth2AuthorizedClientManager @Bean 并将其与 OAuth2AuthorizedClientProvider 组合关联的示例，该组合提供对authorization_code、refresh_token、client_credentials 和密码授权授予类型的支持：
+```
+@Bean
+public OAuth2AuthorizedClientManager authorizedClientManager(
+		ClientRegistrationRepository clientRegistrationRepository,
+		OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+	OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+					.authorizationCode()
+					.refreshToken()
+					.clientCredentials()
+					.password()
+					.build();
+
+	DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultOAuth2AuthorizedClientManager(
+					clientRegistrationRepository, authorizedClientRepository);
+	authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+	return authorizedClientManager;
+}
+```
+#### 核心类与接口
+- ClientRegistration
+	- ClientRegistration 是向 OAuth 2.0 或 OpenID Connect 1.0 提供商注册的客户端的表示。
+	- ClientRegistration 对象保存信息，例如客户端 ID、客户端机密、授权授予类型、重定向 URI、范围、授权 URI、令牌 URI 和其他详细信息
+	- clientAuthenticationMethod：用于向提供者验证客户端的方法。支持的值为 client_secret_basic、client_secret_post、private_key_jwt、client_secret_jwt 和 none（公共客户端）。
+	- authorizationGrantType：OAuth 2.0 授权框架定义了四种授权授予类型。支持的值包括authorization_code、client_credentials、password 以及扩展授予类型 urn:ietf:params:oauth:grant-type:jwt-bearer。
+	- redirectUri：客户端注册的重定向 URI，在最终用户对客户端进行身份验证并授权访问后，授权服务器将最终用户的用户代理重定向到该 URI。
+	- scopes：客户端在授权请求流程中请求的范围，例如 openid、电子邮件或个人资料。
+	- clientName：用于客户端的描述性名称。该名称可能在某些场景中使用，例如在自动生成的登录页面中显示客户端的名称时。
+	- authorizationUri：授权服务器的授权端点 URI。
+	- tokenUri：授权服务器的令牌端点 URI。
+	- jwkSetUri：用于从授权服务器检索 JSON Web 密钥 (JWK) 集的 URI，其中包含用于验证 ID 令牌的 JSON Web 签名 (JWS) 和（可选）UserInfo 响应的加密密钥。
+	- IssuerUri：返回 OpenID Connect 1.0 提供商或 OAuth 2.0 授权服务器的颁发者标识符 URI。
+	- configurationMetadata：OpenID 提供商配置信息。仅当配置了 Spring Boot 2.x 属性 spring.security.oauth2.client.provider.[providerId].issuerUri 时，此信息才可用。
+	- (userInfoEndpoint)uri：用于访问经过身份验证的最终用户的声明和属性的 UserInfo 端点 URI。	
+ 	- (userInfoEndpoint)authenticationMethod：将访问令牌发送到 UserInfo 端点时使用的身份验证方法。支持的值包括标头、表单和查询。
+	- userNameAttributeName：在 UserInfo 响应中返回的属性名称，引用最终用户的名称或标识符。
+	```
+	public final class ClientRegistration {
+		private String registrationId;	
+		private String clientId;	
+		private String clientSecret;	
+		private ClientAuthenticationMethod clientAuthenticationMethod;	
+		private AuthorizationGrantType authorizationGrantType;	
+		private String redirectUri;	
+		private Set<String> scopes;	
+		private ProviderDetails providerDetails;
+		private String clientName;	
+
+		public class ProviderDetails {
+			private String authorizationUri;	
+			private String tokenUri;	
+			private UserInfoEndpoint userInfoEndpoint;
+			private String jwkSetUri;	
+			private String issuerUri;	
+			private Map<String, Object> configurationMetadata;
+
+			public class UserInfoEndpoint {
+				private String uri;	
+				private AuthenticationMethod authenticationMethod;
+				private String userNameAttributeName;	
+
+			}
+		}
+	}
+	```
+	- 我们最初可以通过使用 OpenID Connect 提供程序的配置端点或授权服务器的元数据端点的发现来配置 ClientRegistration
+	- ClientRegistrations 提供了以这种方式配置 ClientRegistration 的便捷方法，如下所示：
+	```
+	//代码依次查询 idp.example.com/issuer/.well-known/openid-configuration、idp.example.com/.well-known/openid-configuration/issuer 和 idp.example.com/.well-known/oauth-authorization-server/issuer，在第一个处停止以返回 200 响应
+	ClientRegistration clientRegistration =
+    ClientRegistrations.fromIssuerLocation("https://idp.example.com/issuer").build();
+	```
+- ClientRegistrationRepository
+	- ClientRegistrationRepository 用作 OAuth 2.0 / OpenID Connect 1.0 ClientRegistration 的存储库。
+	- Spring Boot 2.x 自动配置将 spring.security.oauth2.client.registration.[registrationId] 下的每个属性绑定到 ClientRegistration 的实例，然后在 ClientRegistrationRepository 中管理每个 ClientRegistration 实例。
+	- ClientRegistrationRepository 的默认实现是 InMemoryClientRegistrationRepository.
+- OAuth2AuthorizedClient
+	- OAuth2AuthorizedClient 是授权客户端的表示。当最终用户（资源所有者）授予客户端访问其受保护资源的授权时，客户端被视为已获得授权。
+	- OAuth2AuthorizedClient 的目的是将 OAuth2AccessToken（和可选的 OAuth2RefreshToken）与 ClientRegistration（客户端）和资源所有者（即授予授权的主体最终用户）相关联。
+- OAuth2AuthorizedClientRepository and OAuth2AuthorizedClientService
+	- OAuth2AuthorizedClientRepository 负责在 Web 请求之间持久保存 OAuth2AuthorizedClient，而 OAuth2AuthorizedClientService 的主要作用是在应用程序级别管理 OAuth2AuthorizedClient。
+	- 从开发人员的角度来看，OAuth2AuthorizedClientRepository 或 OAuth2AuthorizedClientService 提供了查找与客户端关联的 OAuth2AccessToken 的功能，以便可以使用它来发起受保护的资源请求。
+	```
+	@Controller
+	public class OAuth2ClientController {
+
+		@Autowired
+		private OAuth2AuthorizedClientService authorizedClientService;
+
+		@GetMapping("/")
+		public String index(Authentication authentication) {
+			OAuth2AuthorizedClient authorizedClient =
+				this.authorizedClientService.loadAuthorizedClient("okta", authentication.getName());
+
+			OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+
+			...
+
+			return "index";
+		}
+	}
+	```
+	- OAuth2AuthorizedClientService 的默认实现是 InMemoryOAuth2AuthorizedClientService，它将 OAuth2AuthorizedClient 对象存储在内存中。
+	- 可以配置 JDBC 实现 JdbcOAuth2AuthorizedClientService 以将 OAuth2AuthorizedClient 实例保留在数据库中
+- OAuth2AuthorizedClientManager and OAuth2AuthorizedClientProvider
+	- OAuth2AuthorizedClientManager 负责 OAuth2AuthorizedClient 的整体管理。主要职责包括：
+		- 使用 OAuth2AuthorizedClientProvider 授权（或重新授权）OAuth 2.0 客户端。
+		- 通常通过使用 OAuth2AuthorizedClientService 或 OAuth2AuthorizedClientRepository 委托 OAuth2AuthorizedClient 的持久性。
+		- 当 OAuth 2.0 客户端成功授权（或重新授权）时，委托给 OAuth2AuthorizationSuccessHandler。
+		- 当 OAuth 2.0 客户端授权（或重新授权）失败时委托给 OAuth2AuthorizationFailureHandler。
+	- OAuth2AuthorizedClientProvider 实现授权（或重新授权）OAuth 2.0 客户端的策略。实现通常实现授权授予类型，例如authorization_code、client_credentials 等。
+	- OAuth2AuthorizedClientManager 的默认实现是 DefaultOAuth2AuthorizedClientManager，它与 OAuth2AuthorizedClientProvider 关联，该 - OAuth2AuthorizedClientProvider 可以使用基于委托的复合来支持多种授权授予类型。您可以使用 OAuth2AuthorizedClientProviderBuilder 来配置和构建基于委托的组合。
+	- 以下代码显示了如何配置和构建 OAuth2AuthorizedClientProvider 组合的示例，该组合提供对authorization_code、refresh_token、client_credentials 和密码授权授予类型的支持：
+	```
+	@Bean
+	public OAuth2AuthorizedClientManager authorizedClientManager(
+			ClientRegistrationRepository clientRegistrationRepository,
+			OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+		OAuth2AuthorizedClientProvider authorizedClientProvider =
+				OAuth2AuthorizedClientProviderBuilder.builder()
+						.authorizationCode()
+						.refreshToken()
+						.clientCredentials()
+						.password()
+						.build();
+
+		DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+				new DefaultOAuth2AuthorizedClientManager(
+						clientRegistrationRepository, authorizedClientRepository);
+		authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+		return authorizedClientManager;
+	}
+	```
+	- 当授权尝试成功时，DefaultOAuth2AuthorizedClientManager 委托给 OAuth2AuthorizationSuccessHandler，后者（默认情况下）通过 OAuth2AuthorizedClientRepository 保存 OAuth2AuthorizedClient。
+	- 如果重新授权失败（例如，刷新令牌不再有效），之前保存的 OAuth2AuthorizedClient 会通过RemoveAuthorizedClientOAuth2AuthorizationFailureHandler 从 OAuth2AuthorizedClientRepository 中删除。
+	- 可以通过 setAuthorizationSuccessHandler(OAuth2AuthorizationSuccessHandler) 和 setAuthorizationFailureHandler(OAuth2AuthorizationFailureHandler) 自定义默认行为。
+	- DefaultOAuth2AuthorizedClientManager 还与 Function<OAuth2AuthorizeRequest, Map<String, Object>> 类型的 contextAttributesMapper 相关联，它负责将 OAuth2AuthorizeRequest 中的属性映射到要与 OAuth2AuthorizationContext 关联的属性映射。当您需要为 OAuth2AuthorizedClientProvider 提供必需（支持）的属性时，这会很有用，例如。 PasswordOAuth2AuthorizedClientProvider 要求资源所有者的用户名和密码在 OAuth2AuthorizationContext.getAttributes() 中可用。以下代码显示了 contextAttributesMapper 的示例:
+	```
+	@Bean
+	public OAuth2AuthorizedClientManager authorizedClientManager(
+			ClientRegistrationRepository clientRegistrationRepository,
+			OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+		OAuth2AuthorizedClientProvider authorizedClientProvider =
+				OAuth2AuthorizedClientProviderBuilder.builder()
+						.password()
+						.refreshToken()
+						.build();
+
+		DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+				new DefaultOAuth2AuthorizedClientManager(
+						clientRegistrationRepository, authorizedClientRepository);
+		authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+		// Assuming the `username` and `password` are supplied as `HttpServletRequest` parameters,
+		// map the `HttpServletRequest` parameters to `OAuth2AuthorizationContext.getAttributes()`
+		authorizedClientManager.setContextAttributesMapper(contextAttributesMapper());
+
+		return authorizedClientManager;
+	}
+
+	private Function<OAuth2AuthorizeRequest, Map<String, Object>> contextAttributesMapper() {
+		return authorizeRequest -> {
+			Map<String, Object> contextAttributes = Collections.emptyMap();
+			HttpServletRequest servletRequest = authorizeRequest.getAttribute(HttpServletRequest.class.getName());
+			String username = servletRequest.getParameter(OAuth2ParameterNames.USERNAME);
+			String password = servletRequest.getParameter(OAuth2ParameterNames.PASSWORD);
+			if (StringUtils.hasText(username) && StringUtils.hasText(password)) {
+				contextAttributes = new HashMap<>();
+
+				// `PasswordOAuth2AuthorizedClientProvider` requires both attributes
+				contextAttributes.put(OAuth2AuthorizationContext.USERNAME_ATTRIBUTE_NAME, username);
+				contextAttributes.put(OAuth2AuthorizationContext.PASSWORD_ATTRIBUTE_NAME, password);
+			}
+			return contextAttributes;
+		};
+	}
+	```
+	- 服务应用程序是何时使用 AuthorizedClientServiceOAuth2AuthorizedClientManager 的常见用例。服务应用程序通常在后台运行，无需任何用户交互，并且通常在系统级帐户而不是用户帐户下运行。使用 client_credentials 授予类型配置的 OAuth 2.0 客户端可以被视为一种服务应用程序。以下代码显示了如何配置为 client_credentials 授予类型提供支持的 AuthorizedClientServiceOAuth2AuthorizedClientManager 的示例：
+	```
+	@Bean
+	public OAuth2AuthorizedClientManager authorizedClientManager(
+			ClientRegistrationRepository clientRegistrationRepository,
+			OAuth2AuthorizedClientService authorizedClientService) {
+
+		OAuth2AuthorizedClientProvider authorizedClientProvider =
+				OAuth2AuthorizedClientProviderBuilder.builder()
+						.clientCredentials()
+						.build();
+
+		AuthorizedClientServiceOAuth2AuthorizedClientManager authorizedClientManager =
+				new AuthorizedClientServiceOAuth2AuthorizedClientManager(
+						clientRegistrationRepository, authorizedClientService);
+		authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+		return authorizedClientManager;
+	}
+	```
+#### OAuth2授权
+##### Authorization Code
+- OAuth2AuthorizationRequestRedirectFilter 使用 OAuth2AuthorizationRequestResolver 来解析 OAuth2AuthorizationRequest 并通过将浏览器重定向到授权服务器的授权端点来启动授权代码授予流程
+- OAuth2AuthorizationRequestResolver 的主要作用是从提供的 Web 请求中解析 OAuth2AuthorizationRequest。默认实现 DefaultOAuth2AuthorizationRequestResolver 在用户请求（默认）路径 /oauth2/authorization/{registrationId} 时，从路径中提取 RegistrationId，并使用它为关联的 ClientRegistration 构建 OAuth2AuthorizationRequest，然后将用户重定向到授权服务器的授权端点
+- 自定义Authorization Request
+	- OAuth2AuthorizationRequestResolver 可以实现的主要用例之一是能够使用 OAuth 2.0 授权框架中定义的标准参数之上的附加参数来自定义授权请求
+	- 例如，OpenID Connect 为授权代码流定义了附加的 OAuth 2.0 请求参数，这些参数扩展自 OAuth 2.0 授权框架中定义的标准参数。这些扩展参数之一是prompt Token，定义的值为：none、login、consent 和 select_account
+	- 以下示例演示如何使用 Consumer<OAuth2AuthorizationRequest.Builder> 配置 DefaultOAuth2AuthorizationRequestResolver，该 Consumer<OAuth2AuthorizationRequest.Builder> 通过包含请求参数prompt=consent来自定义 oauth2Login() 的授权请求
+	```
+	@Configuration
+	@EnableWebSecurity
+	public class OAuth2LoginSecurityConfig {
+
+		@Autowired
+		private ClientRegistrationRepository clientRegistrationRepository;
+
+		@Bean
+		public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			http
+				.authorizeHttpRequests(authorize -> authorize
+					.anyRequest().authenticated()
+				)
+				.oauth2Login(oauth2 -> oauth2
+					.authorizationEndpoint(authorization -> authorization
+						.authorizationRequestResolver(
+							authorizationRequestResolver(this.clientRegistrationRepository)
+						)
+					)
+				);
+			return http.build();
+		}
+
+		private OAuth2AuthorizationRequestResolver authorizationRequestResolver(
+				ClientRegistrationRepository clientRegistrationRepository) {
+
+			DefaultOAuth2AuthorizationRequestResolver authorizationRequestResolver =
+					new DefaultOAuth2AuthorizationRequestResolver(
+							clientRegistrationRepository, "/oauth2/authorization");
+			authorizationRequestResolver.setAuthorizationRequestCustomizer(
+					authorizationRequestCustomizer());
+
+			return  authorizationRequestResolver;
+		}
+
+		private Consumer<OAuth2AuthorizationRequest.Builder> authorizationRequestCustomizer() {
+			return customizer -> customizer
+						.additionalParameters(params -> params.put("prompt", "consent"));
+		}
+	}
+	```
+- 保存Authorization Request
+	- AuthorizationRequestRepository 负责从发起授权请求到收到授权响应（回调）期间 OAuth2AuthorizationRequest 的持久性
+	- AuthorizationRequestRepository的默认实现是HttpSessionOAuth2AuthorizationRequestRepository，它将OAuth2AuthorizationRequest存储在HttpSession中。
+	- 使用自定义的AuthorizationRequestRepository
+	```
+	@Configuration
+	@EnableWebSecurity
+	public class OAuth2ClientSecurityConfig {
+
+		@Bean
+		public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			http
+				.oauth2Client(oauth2 -> oauth2
+					.authorizationCodeGrant(codeGrant -> codeGrant
+						.authorizationRequestRepository(this.authorizationRequestRepository())
+						...
+					)
+				.oauth2Login(oauth2 -> oauth2
+					.authorizationEndpoint(endpoint -> endpoint
+						.authorizationRequestRepository(this.authorizationRequestRepository())
+						...
+					)
+				).build();
+		}
+
+		@Bean
+		public AuthorizationRequestRepository<OAuth2AuthorizationRequest> authorizationRequestRepository() {
+			return new CustomOAuth2AuthorizationRequestRepository();
+		}
+	}
+	```
+- 请求Access Token
+	- 用于授权代码授予的 OAuth2AccessTokenResponseClient 的默认实现是 DefaultAuthorizationCodeTokenResponseClient，它使用 RestOperations 实例在授权服务器的令牌端点处将授权代码交换为访问令牌。
+	- DefaultAuthorizationCodeTokenResponseClient 非常灵活，因为它允许您自定义令牌请求的预处理和/或令牌响应的后处理
+- 自定义Access Token Request
+	- 如果需要自定义令牌请求的预处理，可以为 DefaultAuthorizationCodeTokenResponseClient.setRequestEntityConverter() 提供自定义 Converter<OAuth2AuthorizationCodeGrantRequest, RequestEntity<?>>。默认实现 (OAuth2AuthorizationCodeGrantRequestEntityConverter) 构建标准 OAuth 2.0 访问令牌请求的 RequestEntity 表示。但是，提供自定义转换器可以让您扩展标准令牌请求并添加自定义参数。
+	- 要仅自定义请求的参数，您可以为 OAuth2AuthorizationCodeGrantRequestEntityConverter.setParametersConverter() 提供自定义 Converter<OAuth2AuthorizationCodeGrantRequest, MultiValueMap<String, String>> 以完全覆盖随请求发送的参数。这通常比直接构造 RequestEntity 更简单
+- 自定义Access Token Response
+	- 另一方面，如果您需要自定义令牌响应的后处理，则需要为 DefaultAuthorizationCodeTokenResponseClient.setRestOperations() 提供自定义配置的 RestOperations。默认的 RestOperations 配置如下：
+	```
+	RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+	restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+	```
+	- OAuth2AccessTokenResponseHttpMessageConverter 是 OAuth 2.0 访问令牌响应的 HttpMessageConverter。
+	- 可以为 OAuth2AccessTokenResponseHttpMessageConverter.setAccessTokenResponseConverter() 提供自定义 Converter<Map<String, Object>, OAuth2AccessTokenResponse>，用于将 OAuth 2.0 访问令牌响应参数转换为 OAuth2AccessTokenResponse。
+	- OAuth2ErrorResponseErrorHandler 是一个 ResponseErrorHandler，可以处理 OAuth 2.0 错误，例如 400 Bad Request。它使用 OAuth2ErrorHttpMessageConverter 将 OAuth 2.0 错误参数转换为 OAuth2Error。
+	- 无论您自定义 DefaultAuthorizationCodeTokenResponseClient 还是提供自己的 OAuth2AccessTokenResponseClient 实现，都需要按如下方式进行配置
+	```
+	@Configuration
+	@EnableWebSecurity
+	public class OAuth2ClientSecurityConfig {
+
+		@Bean
+		public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			http
+				.oauth2Client(oauth2 -> oauth2
+					.authorizationCodeGrant(codeGrant -> codeGrant
+						.accessTokenResponseClient(this.accessTokenResponseClient())
+						...
+					)
+				);
+			return http.build();
+		}
+	}
+	```
+##### Refresh Token
+- 刷新令牌
+	- 用于刷新令牌授予的 OAuth2AccessTokenResponseClient 的默认实现是 DefaultRefreshTokenTokenResponseClient，它在授权服务器的令牌端点刷新访问令牌时使用 RestOperations。
+	- DefaultRefreshTokenTokenResponseClient 非常灵活，因为它允许您自定义令牌请求的预处理或令牌响应的后处理。
+- 自定义Access Token Request 
+	- 如果需要自定义令牌请求的预处理，可以为 DefaultRefreshTokenTokenResponseClient.setRequestEntityConverter() 提供自定义 Converter<OAuth2RefreshTokenGrantRequest, RequestEntity<?>>。
+	- 默认实现 (OAuth2RefreshTokenGrantRequestEntityConverter) 构建标准 OAuth 2.0 访问令牌请求的 RequestEntity 表示。
+	- 但是，提供自定义转换器可以让您扩展标准令牌请求并添加自定义参数。
+	- 如果仅需要自定义请求的参数，可以为 OAuth2RefreshTokenGrantRequestEntityConverter.setParametersConverter() 提供自定义 Converter<OAuth2RefreshTokenGrantRequest, MultiValueMap<String, String>> 以完全覆盖随请求发送的参数。这通常比直接构造 RequestEntity 更简单。
+- 自定义Access Token Response
+	- 另一方面，如果您需要自定义令牌响应的后处理，则需要为 DefaultRefreshTokenTokenResponseClient.setRestOperations() 提供自定义配置的 RestOperations。默认的 RestOperations 配置如下：
+	```
+	RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+	restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+	```
+	- OAuth2AccessTokenResponseHttpMessageConverter 是 OAuth 2.0 访问令牌响应的 HttpMessageConverter。
+	- 可以为 OAuth2AccessTokenResponseHttpMessageConverter.setAccessTokenResponseConverter() 提供自定义 Converter<Map<String, Object>, OAuth2AccessTokenResponse>，用于将 OAuth 2.0 访问令牌响应参数转换为 OAuth2AccessTokenResponse。
+	- OAuth2ErrorResponseErrorHandler 是一个 ResponseErrorHandler，可以处理 OAuth 2.0 错误，例如 400 Bad Request。它使用 OAuth2ErrorHttpMessageConverter 将 OAuth 2.0 错误参数转换为 OAuth2Error。
+	- 无论您自定义 DefaultRefreshTokenTokenResponseClient 还是提供自己的 OAuth2AccessTokenResponseClient 实现，都需要按如下方式进行配置：
+	```
+	// Customize
+	OAuth2AccessTokenResponseClient<OAuth2RefreshTokenGrantRequest> refreshTokenTokenResponseClient = ...
+
+	OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+					.authorizationCode()
+					.refreshToken(configurer -> configurer.accessTokenResponseClient(refreshTokenTokenResponseClient))
+					.build();
+
+	...
+
+	authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+	```
+	- 在授权代码和密码授予类型的访问令牌响应中可以选择性的返回 OAuth2RefreshToken。如果 OAuth2AuthorizedClient.getRefreshToken() 可用且 OAuth2AuthorizedClient.getAccessToken() 过期，则由 RefreshTokenOAuth2AuthorizedClientProvider 自动对token进行刷新
+##### Client Credentials
+- 获取token
+	- 于客户端凭据授予的 OAuth2AccessTokenResponseClient 的默认实现是 DefaultClientCredentialsTokenResponseClient，它在授权服务器的令牌端点请求访问令牌时使用 RestOperations。
+	- DefaultClientCredentialsTokenResponseClient 非常灵活，因为它允许您自定义令牌请求的预处理或令牌响应的后处理
+- 自定义Access Token Request 
+	- 如果需要自定义令牌请求的预处理，可以为 DefaultClientCredentialsTokenResponseClient.setRequestEntityConverter() 提供自定义 Converter<OAuth2ClientCredentialsGrantRequest, RequestEntity<?>>。
+	- 默认实现 (OAuth2ClientCredentialsGrantRequestEntityConverter) 构建标准 OAuth 2.0 访问令牌请求的 RequestEntity 表示。但是，提供自定义转换器可以让您扩展标准令牌请求并添加自定义参数。
+	- 如果仅需要自定义请求的参数，您可以为 OAuth2ClientCredentialsGrantRequestEntityConverter.setParametersConverter() 提供自定义 Converter<OAuth2ClientCredentialsGrantRequest, MultiValueMap<String, String>> 以完全覆盖随请求发送的参数。这通常比直接构造 RequestEntity 更简单。
+- 自定义Access Token Response
+	- 另一方面，如果您需要自定义令牌响应的后处理，则需要为 DefaultClientCredentialsTokenResponseClient.setRestOperations() 提供自定义配置的 RestOperations。默认的 RestOperations 配置如下：
+	```
+	RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+	restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+	```
+- 使用token
+```
+@Bean
+public OAuth2AuthorizedClientManager authorizedClientManager(
+		ClientRegistrationRepository clientRegistrationRepository,
+		OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+	OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+					.clientCredentials()
+					.build();
+
+	DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultOAuth2AuthorizedClientManager(
+					clientRegistrationRepository, authorizedClientRepository);
+	authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+	return authorizedClientManager;
+}
+
+@Controller
+public class OAuth2ClientController {
+
+	@Autowired
+	private OAuth2AuthorizedClientManager authorizedClientManager;
+
+	@GetMapping("/")
+	public String index(Authentication authentication,
+						HttpServletRequest servletRequest,
+						HttpServletResponse servletResponse) {
+
+		OAuth2AuthorizeRequest authorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+				.principal(authentication)
+				.attributes(attrs -> {
+					attrs.put(HttpServletRequest.class.getName(), servletRequest);
+					attrs.put(HttpServletResponse.class.getName(), servletResponse);
+				})
+				.build();
+		OAuth2AuthorizedClient authorizedClient = this.authorizedClientManager.authorize(authorizeRequest);
+
+		OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+
+		...
+
+		return "index";
+	}
+}
+```
+##### Resource Owner Password Credentials
+- 获取token
+	- 资源所有者密码凭证授予的 OAuth2AccessTokenResponseClient 的默认实现是 DefaultPasswordTokenResponseClient，它在授权服务器的令牌端点请求访问令牌时使用 RestOperations。
+	- DefaultPasswordTokenResponseClient 非常灵活，因为它允许您自定义令牌请求的预处理或令牌响应的后处理。
+- 自定义Access Token Request 
+	- 如果需要自定义令牌请求的预处理，可以为 DefaultPasswordTokenResponseClient.setRequestEntityConverter() 提供自定义 Converter<OAuth2PasswordGrantRequest, RequestEntity<?>>。默认实现 (OAuth2PasswordGrantRequestEntityConverter) 构建标准 OAuth 2.0 访问令牌请求的 RequestEntity 表示。但是，提供自定义转换器可以让您扩展标准令牌请求并添加自定义参数。
+	- 如果仅需要自定义请求的参数，您可以为 OAuth2PasswordGrantRequestEntityConverter.setParametersConverter() 提供自定义 Converter<OAuth2PasswordGrantRequest, MultiValueMap<String, String>> 以完全覆盖随请求发送的参数。这通常比直接构造 RequestEntity 更简单。
+- 自定义Access Token Response
+	- 另一方面，如果您需要自定义令牌响应的后处理，则需要为 DefaultPasswordTokenResponseClient.setRestOperations() 提供自定义配置的 RestOperations。默认的 RestOperations 配置如下：
+	```
+	RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+	restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+	```
+- 使用token
+```
+@Bean
+public OAuth2AuthorizedClientManager authorizedClientManager(
+		ClientRegistrationRepository clientRegistrationRepository,
+		OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+	OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+					.password()
+					.refreshToken()
+					.build();
+
+	DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultOAuth2AuthorizedClientManager(
+					clientRegistrationRepository, authorizedClientRepository);
+	authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+	// Assuming the `username` and `password` are supplied as `HttpServletRequest` parameters,
+	// map the `HttpServletRequest` parameters to `OAuth2AuthorizationContext.getAttributes()`
+	authorizedClientManager.setContextAttributesMapper(contextAttributesMapper());
+
+	return authorizedClientManager;
+}
+
+private Function<OAuth2AuthorizeRequest, Map<String, Object>> contextAttributesMapper() {
+	return authorizeRequest -> {
+		Map<String, Object> contextAttributes = Collections.emptyMap();
+		HttpServletRequest servletRequest = authorizeRequest.getAttribute(HttpServletRequest.class.getName());
+		String username = servletRequest.getParameter(OAuth2ParameterNames.USERNAME);
+		String password = servletRequest.getParameter(OAuth2ParameterNames.PASSWORD);
+		if (StringUtils.hasText(username) && StringUtils.hasText(password)) {
+			contextAttributes = new HashMap<>();
+
+			// `PasswordOAuth2AuthorizedClientProvider` requires both attributes
+			contextAttributes.put(OAuth2AuthorizationContext.USERNAME_ATTRIBUTE_NAME, username);
+			contextAttributes.put(OAuth2AuthorizationContext.PASSWORD_ATTRIBUTE_NAME, password);
+		}
+		return contextAttributes;
+	};
+}
+
+@Controller
+public class OAuth2ClientController {
+
+	@Autowired
+	private OAuth2AuthorizedClientManager authorizedClientManager;
+
+	@GetMapping("/")
+	public String index(Authentication authentication,
+						HttpServletRequest servletRequest,
+						HttpServletResponse servletResponse) {
+
+		OAuth2AuthorizeRequest authorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+				.principal(authentication)
+				.attributes(attrs -> {
+					attrs.put(HttpServletRequest.class.getName(), servletRequest);
+					attrs.put(HttpServletResponse.class.getName(), servletResponse);
+				})
+				.build();
+		OAuth2AuthorizedClient authorizedClient = this.authorizedClientManager.authorize(authorizeRequest);
+
+		OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+
+		...
+
+		return "index";
+	}
+}
+```
+##### JWT Bearer
+- 获取token
+- 自定义Access Token Request 
+	- 如果需要自定义令牌请求的预处理，可以为 DefaultJwtBearerTokenResponseClient.setRequestEntityConverter() 提供自定义 Converter<JwtBearerGrantRequest, RequestEntity<?>>。默认实现 JwtBearerGrantRequestEntityConverter 构建 OAuth 2.0 访问令牌请求的 RequestEntity 表示。但是，提供自定义转换器将允许您扩展令牌请求并添加自定义参数。
+	- 要仅自定义请求的参数，您可以为 JwtBearerGrantRequestEntityConverter.setParametersConverter() 提供自定义 Converter<JwtBearerGrantRequest, MultiValueMap<String, String>> 以完全覆盖随请求发送的参数。这通常比直接构造 RequestEntity 更简单。
+- 自定义Access Token Response
+	- 另一方面，如果您需要自定义令牌响应的后处理，则需要为 DefaultJwtBearerTokenResponseClient.setRestOperations() 提供自定义配置的 RestOperations。默认的 RestOperations 配置如下
+	```
+	RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+		new FormHttpMessageConverter(),
+		new OAuth2AccessTokenResponseHttpMessageConverter()));
+
+	restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+	```
+- 使用token
+```
+@Bean
+public OAuth2AuthorizedClientManager authorizedClientManager(
+		ClientRegistrationRepository clientRegistrationRepository,
+		OAuth2AuthorizedClientRepository authorizedClientRepository) {
+
+	JwtBearerOAuth2AuthorizedClientProvider jwtBearerAuthorizedClientProvider =
+			new JwtBearerOAuth2AuthorizedClientProvider();
+
+	OAuth2AuthorizedClientProvider authorizedClientProvider =
+			OAuth2AuthorizedClientProviderBuilder.builder()
+					.provider(jwtBearerAuthorizedClientProvider)
+					.build();
+
+	DefaultOAuth2AuthorizedClientManager authorizedClientManager =
+			new DefaultOAuth2AuthorizedClientManager(
+					clientRegistrationRepository, authorizedClientRepository);
+	authorizedClientManager.setAuthorizedClientProvider(authorizedClientProvider);
+
+	return authorizedClientManager;
+}
+
+@RestController
+public class OAuth2ResourceServerController {
+
+	@Autowired
+	private OAuth2AuthorizedClientManager authorizedClientManager;
+
+	@GetMapping("/resource")
+	public String resource(JwtAuthenticationToken jwtAuthentication) {
+		OAuth2AuthorizeRequest authorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("okta")
+				.principal(jwtAuthentication)
+				.build();
+		OAuth2AuthorizedClient authorizedClient = this.authorizedClientManager.authorize(authorizeRequest);
+		OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+
+		...
+
+	}
+}
+```
+#### OAuth2鉴权 JWT Bearer
+- JWT Bearer客户端身份验证的默认实现是 NimbusJwtClientAuthenticationParametersConverter，它是一个转换器，通过在 client_assertion 参数中添加签名的 JSON Web 令牌 (JWS) 来自定义令牌请求参数。
+- 用于签署 JWS 的 java.security.PrivateKey 或 javax.crypto.SecretKey 由与 NimbusJwtClientAuthenticationParametersConverter 关联的 com.nimbusds.jose.jwk.JWK 解析器提供
+- 使用private_key_jwt
+```
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-authentication-method: private_key_jwt
+            authorization-grant-type: authorization_code
+            ...
+
+Function<ClientRegistration, JWK> jwkResolver = (clientRegistration) -> {
+	if (clientRegistration.getClientAuthenticationMethod().equals(ClientAuthenticationMethod.PRIVATE_KEY_JWT)) {
+		// Assuming RSA key type
+		RSAPublicKey publicKey = ...
+		RSAPrivateKey privateKey = ...
+		return new RSAKey.Builder(publicKey)
+				.privateKey(privateKey)
+				.keyID(UUID.randomUUID().toString())
+				.build();
+	}
+	return null;
+};
+
+OAuth2AuthorizationCodeGrantRequestEntityConverter requestEntityConverter =
+		new OAuth2AuthorizationCodeGrantRequestEntityConverter();
+requestEntityConverter.addParametersConverter(
+		new NimbusJwtClientAuthenticationParametersConverter<>(jwkResolver));
+
+DefaultAuthorizationCodeTokenResponseClient tokenResponseClient =
+		new DefaultAuthorizationCodeTokenResponseClient();
+tokenResponseClient.setRequestEntityConverter(requestEntityConverter);			
+```
+- 使用client_secret_jwt
+```
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          okta:
+            client-id: okta-client-id
+            client-secret: okta-client-secret
+            client-authentication-method: client_secret_jwt
+            authorization-grant-type: client_credentials
+            ...
+
+Function<ClientRegistration, JWK> jwkResolver = (clientRegistration) -> {
+	if (clientRegistration.getClientAuthenticationMethod().equals(ClientAuthenticationMethod.CLIENT_SECRET_JWT)) {
+		SecretKeySpec secretKey = new SecretKeySpec(
+				clientRegistration.getClientSecret().getBytes(StandardCharsets.UTF_8),
+				"HmacSHA256");
+		return new OctetSequenceKey.Builder(secretKey)
+				.keyID(UUID.randomUUID().toString())
+				.build();
+	}
+	return null;
+};
+
+OAuth2ClientCredentialsGrantRequestEntityConverter requestEntityConverter =
+		new OAuth2ClientCredentialsGrantRequestEntityConverter();
+requestEntityConverter.addParametersConverter(
+		new NimbusJwtClientAuthenticationParametersConverter<>(jwkResolver));
+
+DefaultClientCredentialsTokenResponseClient tokenResponseClient =
+		new DefaultClientCredentialsTokenResponseClient();
+tokenResponseClient.setRequestEntityConverter(requestEntityConverter);
+```
+- 自定义 JWT Claim包含的字段
+	- NimbusJwtClientAuthenticationParametersConverter 生成的 JWT 默认包含 iss、sub、aud、jti、iat 和 exp 声明。
+	- 可以通过向 setJwtClientAssertionCustomizer() 提供 Consumer<NimbusJwtClientAuthenticationParametersConverter.JwtClientAuthenticationContext<T>> 来自定义标头和/或声明。以下示例展示了如何自定义 JWT 的声明
+	```
+	Function<ClientRegistration, JWK> jwkResolver = ...
+
+	NimbusJwtClientAuthenticationParametersConverter<OAuth2ClientCredentialsGrantRequest> converter =
+			new NimbusJwtClientAuthenticationParametersConverter<>(jwkResolver);
+	converter.setJwtClientAssertionCustomizer((context) -> {
+		context.getHeaders().header("custom-header", "header-value");
+		context.getClaims().claim("custom-claim", "claim-value");
+	});
+	```
+#### Authorized Client Features
+- 解析Authorized Client
+	- @RegisteredOAuth2AuthorizedClient 注释提供了将方法参数解析为 OAuth2AuthorizedClient 类型的参数值的功能。
+	- 与使用 OAuth2AuthorizedClientManager 或 OAuth2AuthorizedClientService 访问 OAuth2AuthorizedClient 相比，这是一种方便的替代方法。以下示例显示如何使用@RegisteredOAuth2AuthorizedClient：
+	```
+	@Controller
+	public class OAuth2ClientController {
+
+		@GetMapping("/")
+		public String index(@RegisteredOAuth2AuthorizedClient("okta") OAuth2AuthorizedClient authorizedClient) {
+			OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+
+			...
+
+			return "index";
+		}
+	}
+	```
+- Servlet 环境的 WebClient 集成
+	- Auth 2.0 客户端支持通过使用 ExchangeFilterFunction 与 WebClient 集成。
+	- ServletOAuth2AuthorizedClientExchangeFilterFunction 提供了一种通过使用 OAuth2AuthorizedClient 并包含关联的 OAuth2AccessToken 作为承载令牌来请求受保护资源的机制。它直接使用 OAuth2AuthorizedClientManager，因此继承了以下功能：
+		- 如果客户端尚未获得授权，则会请求 OAuth2AccessToken。
+			- authorization_code：触发授权请求重定向以启动流程。
+			- client_credentials：访问令牌直接从令牌端点获取。
+			- 密码：访问令牌直接从令牌端点获取。
+		- 如果 OAuth2AccessToken 过期，并且有 OAuth2AuthorizedClientProvider 可用于执行授权，则刷新（或更新）它
+	- 以下代码显示了如何使用 OAuth 2.0 客户端支持配置 WebClient 的示例:
+	```
+	@Bean
+	WebClient webClient(OAuth2AuthorizedClientManager authorizedClientManager) {
+		ServletOAuth2AuthorizedClientExchangeFilterFunction oauth2Client =
+				new ServletOAuth2AuthorizedClientExchangeFilterFunction(authorizedClientManager);
+		return WebClient.builder()
+				.apply(oauth2Client.oauth2Configuration())
+				.build();
+	}
+	```
+	- 提供Authorized Client
+		- oauth2AuthorizedClient与clientRegistrationId都是ServletOAuth2AuthorizedClientExchangeFilterFunction的静态方法
+	```
+	@GetMapping("/")
+	public String index(@RegisteredOAuth2AuthorizedClient("okta") OAuth2AuthorizedClient authorizedClient) {
+		String resourceUri = ...
+
+		String body = webClient
+				.get()
+				.uri(resourceUri)
+				.attributes(oauth2AuthorizedClient(authorizedClient))
+				.retrieve()
+				.bodyToMono(String.class)
+				.block();
+
+		...
+
+		return "index";
+	}
+	@GetMapping("/")
+	public String index() {
+		String resourceUri = ...
+
+		String body = webClient
+				.get()
+				.uri(resourceUri)
+				.attributes(clientRegistrationId("okta"))
+				.retrieve()
+				.bodyToMono(String.class)
+				.block();
+
+		...
+
+		return "index";
+	}
+	```
+	- 默认Authorized Client
+		- 如果未提供 OAuth2AuthorizedClient 或 ClientRegistration.getRegistrationId() 作为请求属性，则 ServletOAuth2AuthorizedClientExchangeFilterFunction 可以根据其配置确定要使用的默认客户端。
+		- 如果配置了 setDefaultOAuth2AuthorizedClient(true) 并且用户已使用 HttpSecurity.oauth2Login() 进行身份验证，则使用与当前 OAuth2AuthenticationToken 关联的 OAuth2AccessToken。
+		```
+		@Bean
+		WebClient webClient(OAuth2AuthorizedClientManager authorizedClientManager) {
+			ServletOAuth2AuthorizedClientExchangeFilterFunction oauth2Client =
+					new ServletOAuth2AuthorizedClientExchangeFilterFunction(authorizedClientManager);
+			oauth2Client.setDefaultOAuth2AuthorizedClient(true);
+			return WebClient.builder()
+					.apply(oauth2Client.oauth2Configuration())
+					.build();
+		}
+		```
+		- 或者，如果 setDefaultClientRegistrationId("okta") 配置了有效的 ClientRegistration，则使用与 OAuth2AuthorizedClient 关联的 OAuth2AccessToken。
+		```
+		@Bean
+		WebClient webClient(OAuth2AuthorizedClientManager authorizedClientManager) {
+			ServletOAuth2AuthorizedClientExchangeFilterFunction oauth2Client =
+					new ServletOAuth2AuthorizedClientExchangeFilterFunction(authorizedClientManager);
+			oauth2Client.setDefaultClientRegistrationId("okta");
+			return WebClient.builder()
+					.apply(oauth2Client.oauth2Configuration())
+					.build();
+		}
+		```
+### OAuth 2.0 Resource Server
